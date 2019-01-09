@@ -54,14 +54,28 @@ using namespace MobileRGBD::Kinect2;
 #include <vtkPNGWriter.h>
 #include <vtkWindowToImageFilter.h>
 #include <vtkRenderWindowInteractor.h>
-
+#include <pcl/common/transforms.h>
 #include <pcl/visualization/cloud_viewer.h>
 
 #include <algorithm>
 
 #include <System/Thread.h>
 
-void removePlane(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, float distanceThreshold = 0.03, int pointThreshold = 20000);
+struct plane{
+    /*
+     * Representation of a plane
+     * ax+by+cz+d = 0
+     */
+    float a;
+    float b;
+    float c;
+    float d;
+};
+
+void removePlane(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &bestPlane, float distanceThreshold = 0.03, int pointThreshold = 20000);
+
+void rotateCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &bestPlane);
+void initRot(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud);
 
 
 /** @brief You must call with a folder name
@@ -114,15 +128,15 @@ int main(int argc, char *argv[]) {
                     az = (*LocalData) / 1000.0f;    //The depth value from the Kinect back meters
 
                     // a. is in kinect frame, r. is rotated
-                    rx = az;
-                    ax = ry = rx * DepthToCamera[CurPixel].X;
-                    ay = rz = rx * DepthToCamera[CurPixel].Y;
+                    rz = az;
+                    ax = rx = az * DepthToCamera[CurPixel].X;
+                    ay = ry = az * DepthToCamera[CurPixel].Y;
 
                     // construct a point
                     pcl::PointXYZ Point;
-                    Point.x = rz;
+                    Point.x = rx;
                     Point.y = ry;
-                    Point.z = rx;
+                    Point.z = rz;
 
                     // push it in the pont cloud
                     cloud->push_back(Point);
@@ -132,23 +146,47 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        removePlane(cloud);
-
-        // Here we have a new cloud, view it
+        plane floorPlane;
+        initRot(cloud);
+        removePlane(cloud, floorPlane);
+        printf("Floor plane : a : %f, b: %f, c %f, d : %f \n", floorPlane.a, floorPlane.b, floorPlane.c, floorPlane.d);
         pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
+        rotateCloud(cloud, floorPlane);
         viewer.showCloud(cloud);
         while (!viewer.wasStopped()) {}
-
     }
 
     return 0;
 
 }
 
-void removePlane(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, float distanceThreshold, int pointThreshold){
+void initRot(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) {
+    Eigen::Affine3f transform_2 = Eigen::Affine3f::Identity();
+    float theta = static_cast<float>(3.14/8) ;
+    transform_2.rotate(Eigen::AngleAxisf(theta, Eigen::Vector3f::UnitX()));
+
+    pcl::transformPointCloud(*cloud, *cloud, transform_2);
+}
+
+void rotateCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &floorPlane){
+    /*  METHOD #2: Using a Affine3f
+    This method is easier and less error prone
+  */
+    Eigen::Affine3f transform = Eigen::Affine3f::Identity();
+    float theta = static_cast<float>(acos(-floorPlane.b));
+    if (floorPlane.b*floorPlane.c > 0){
+        theta = -theta;
+    }
+    printf(" theta : %f \n", theta);
+    transform.rotate (Eigen::AngleAxisf (theta, Eigen::Vector3f::UnitX()));
+    pcl::transformPointCloud (*cloud, *cloud, transform);
+}
+
+void removePlane(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &bestPlane, float distanceThreshold, int pointThreshold){
 	/*
 	 * remove plane from the point cloud.
 	 */
+    bestPlane.b = 0;
     while (true) {
         pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
         pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
@@ -163,9 +201,18 @@ void removePlane(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, float distanc
 
         seg.setInputCloud(cloud);
         seg.segment(*inliers, *coefficients);
-        fprintf(stderr, "nb pt : %lu", inliers->indices.size());
-        if (inliers->indices.size() < pointThreshold){ break;} //bread if the plane do not contain enough points
-
+        fprintf(stderr, "nb pt : %lu \n", inliers->indices.size());
+        if (inliers->indices.size() < pointThreshold){ break;} //break if the plane do not contain enough points
+        std::cerr << "Model coefficients: " << coefficients->values[0] << " "
+                  << coefficients->values[1] << " "
+                  << coefficients->values[2] << " "
+                  << coefficients->values[3] << std::endl;
+        if (abs(coefficients->values[1]) > abs(bestPlane.b)){
+            bestPlane.a = coefficients->values[0];
+            bestPlane.b = coefficients->values[1];
+            bestPlane.c = coefficients->values[2];
+            bestPlane.d = coefficients->values[3];
+        }
         pcl::ExtractIndices<pcl::PointXYZ> extract;
         extract.setInputCloud(cloud);
         extract.setIndices(inliers);
