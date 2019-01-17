@@ -134,7 +134,7 @@ int main(int argc, char *argv[]) {
 
                     // construct a point
                     pcl::PointXYZ Point;
-                    Point.x = rx;
+                    Point.x = -rx;
                     Point.y = ry;
                     Point.z = rz;
 
@@ -151,6 +151,8 @@ int main(int argc, char *argv[]) {
         removePlane(cloud, floorPlane);
         printf("Floor plane : a : %f, b: %f, c %f, d : %f \n", floorPlane.a, floorPlane.b, floorPlane.c, floorPlane.d);
         pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
+        viewer.showCloud(cloud);
+        while (!viewer.wasStopped()) {}
         rotateCloud(cloud, floorPlane);
         viewer.showCloud(cloud);
         while (!viewer.wasStopped()) {}
