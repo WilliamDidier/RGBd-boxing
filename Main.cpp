@@ -72,9 +72,18 @@ struct plane{
     float d;
 };
 
-void removePlane(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &bestPlane, float distanceThreshold = 0.03, int pointThreshold = 20000);
+struct robotPosition{
+    /*
+     * Store the robot position
+     */
+    float x;
+    float y;
+    float o;
+};
 
-void rotateCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &bestPlane);
+void removePlane(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, struct plane &bestPlane, float distanceThreshold = 0.03, int pointThreshold = 20000);
+
+void rotateCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, struct plane &bestPlane, struct robotPosition &robPos);
 void initRot(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud);
 
 
@@ -98,19 +107,24 @@ int main(int argc, char *argv[]) {
 
 
     DrawDepthView ReadAndDrawDepth(CurrentWorkingFolder);
+    ReadTimestampFile LocalisationData(CurrentWorkingFolder+"/robulab/Localization.timestamp");
 
     // Look at all data from timestamp
     while (ReadAndDrawDepth.GetNextTimestamp()) {
         // Get current data from Kinect
-        if (ReadAndDrawDepth.LoadFrame(ReadAndDrawDepth.CurrentTimestamp) == false) {
+        if (!ReadAndDrawDepth.LoadFrame(ReadAndDrawDepth.CurrentTimestamp) ||
+            !LocalisationData.GetDataForTimestamp(ReadAndDrawDepth.CurrentTimestamp )) {
             // Should never appear
             fprintf(stderr, "argh\n\n");
             continue;
         }
 
 
-        // ok, got to depth frame, get it as uint16 data (millimeter value)
+        // Load robot position
         uint16_t *LocalData = &((uint16_t *) ReadAndDrawDepth.FrameBuffer)[DepthHeight * DepthWidth - 1];
+        struct robotPosition curentRobotPosition;
+        sscanf(LocalisationData.DataBuffer, "{\"x\":%f,\"y\":%f,\"o\":%f}",
+               &curentRobotPosition.x, &curentRobotPosition.y, &curentRobotPosition.o);
 
         // Create a point cloud for this frame
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
@@ -136,7 +150,7 @@ int main(int argc, char *argv[]) {
                     pcl::PointXYZ Point;
                     Point.x = -rx;
                     Point.y = ry;
-                    Point.z = rz;
+                    Point.z = -rz;
 
                     // push it in the pont cloud
                     cloud->push_back(Point);
@@ -146,16 +160,15 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
         plane floorPlane;
         initRot(cloud);
         removePlane(cloud, floorPlane);
         printf("Floor plane : a : %f, b: %f, c %f, d : %f \n", floorPlane.a, floorPlane.b, floorPlane.c, floorPlane.d);
-        pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
+        rotateCloud(cloud, floorPlane, curentRobotPosition);
         viewer.showCloud(cloud);
         while (!viewer.wasStopped()) {}
-        rotateCloud(cloud, floorPlane);
-        viewer.showCloud(cloud);
-        while (!viewer.wasStopped()) {}
+
     }
 
     return 0;
@@ -164,23 +177,40 @@ int main(int argc, char *argv[]) {
 
 void initRot(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) {
     Eigen::Affine3f transform_2 = Eigen::Affine3f::Identity();
-    float theta = static_cast<float>(3.14/8) ;
-    transform_2.rotate(Eigen::AngleAxisf(theta, Eigen::Vector3f::UnitX()));
+    float theta = static_cast<float>(-3.14/8) ;
+    transform_2.rotate(Eigen::AngleAxisf(-0.643455, Eigen::Vector3f::UnitX()));
 
     pcl::transformPointCloud(*cloud, *cloud, transform_2);
 }
 
-void rotateCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &floorPlane){
+void rotateCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &floorPlane, struct robotPosition &robPos){
     /*  METHOD #2: Using a Affine3f
     This method is easier and less error prone
   */
     Eigen::Affine3f transform = Eigen::Affine3f::Identity();
-    float theta = static_cast<float>(acos(-floorPlane.b));
-    if (floorPlane.b*floorPlane.c > 0){
-        theta = -theta;
+
+    float costheta = static_cast<float>(floorPlane.b/(sqrt(pow(floorPlane.b,2)+pow(floorPlane.c,2))));
+    if (floorPlane.b < 0){
+        costheta = -costheta;
     }
+
+    printf(" theta : %f \n", costheta);
+    float theta = static_cast<float>(-acos(costheta));
     printf(" theta : %f \n", theta);
     transform.rotate (Eigen::AngleAxisf (theta, Eigen::Vector3f::UnitX()));
+    pcl::transformPointCloud (*cloud, *cloud, transform);
+    transform = Eigen::Affine3f::Identity();
+
+    transform.translation() << 0, -(floorPlane.d/(sqrt(pow(floorPlane.b,2)+pow(floorPlane.c,2)+pow(floorPlane.a,2)))), 0;
+    pcl::transformPointCloud (*cloud, *cloud, transform);
+    transform = Eigen::Affine3f::Identity();
+
+
+    transform.rotate (Eigen::AngleAxisf (-robPos.o, Eigen::Vector3f::UnitY()));
+    pcl::transformPointCloud (*cloud, *cloud, transform);
+    transform = Eigen::Affine3f::Identity();
+
+    transform.translation() << -robPos.x, 0, -robPos.y;
     pcl::transformPointCloud (*cloud, *cloud, transform);
 }
 
