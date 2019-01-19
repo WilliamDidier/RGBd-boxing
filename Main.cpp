@@ -19,12 +19,12 @@
 #include <stdio.h>
 
 #include <sys/stat.h>
-
 #if defined WIN32 || defined WIN64
-#include <direct.h>
+	#include <direct.h>
 #endif
 
 #include "Drawing/DrawDepthView.h"
+#include "Drawing/DrawCameraView.h"
 
 #include <System/SimpleList.h>
 #include <System/SimpleString.h>
@@ -61,116 +61,115 @@ using namespace MobileRGBD::Kinect2;
 
 #include <System/Thread.h>
 
-void removePlane(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, float distanceThreshold = 0.03, int pointThreshold = 20000);
+using namespace cv;
 
 
 /** @brief You must call with a folder name
  * @return 0 if successful, negative value for failure.
  * @example 
  */
-int main(int argc, char *argv[]) {
-    // Get param without checking if param exist, tthis is a simple example
-    Omiscid::SimpleString CurrentWorkingFolder = argv[1];
+int main( int argc, char *argv[] )
+{
+	// Get param without checking if param exist, tthis is a simple example	
+	Omiscid::SimpleString CurrentWorkingFolder = argv[1];
 
-    // Read PointF matrix with projection coeffecient
-    Omiscid::TypedMemoryBuffer<PointF> DepthToCamera;
-    DepthToCamera.SetNewNumberOfElementsInBuffer(DepthWidth * DepthHeight);
-    FILE *fdtc = fopen("DepthToCameraTable.raw", "rb");
-    if (fdtc == NULL || fread((PointF *) DepthToCamera, DepthWidth * DepthHeight * 8, 1, fdtc) != 1) {
-        fprintf(stderr, "Unable to read DepthToCameraTable.raw\n");
-        return 0;
-    }
-    fclose(fdtc);
+	// Read PointF matrix with projection coeffecient
+	Omiscid::TypedMemoryBuffer<PointF> DepthToCamera;
+	DepthToCamera.SetNewNumberOfElementsInBuffer( DepthWidth * DepthHeight );
+	FILE * fdtc = fopen( "DepthToCameraTable.raw", "rb" );
+	if ( fdtc == NULL || fread((PointF*)DepthToCamera, DepthWidth * DepthHeight * 8, 1, fdtc ) != 1 )
+	{
+		fprintf( stderr,"Unable to read DepthToCameraTable.raw\n" );
+		return 0;
+	}
+	fclose( fdtc );
 
+	Mat RigidTrans = (Mat_<float>(2,3) << 0.340578906312217, 0.001079990228324099, -81.51090136055846, 0.0002631972723408978,
+		0.3441404069350427, 18.88198371718263);
 
-    DrawDepthView ReadAndDrawDepth(CurrentWorkingFolder);
+	Mat iRigidTrans;
 
-    // Look at all data from timestamp
-    while (ReadAndDrawDepth.GetNextTimestamp()) {
-        // Get current data from Kinect
-        if (ReadAndDrawDepth.LoadFrame(ReadAndDrawDepth.CurrentTimestamp) == false) {
-            // Should never appear
-            fprintf(stderr, "argh\n\n");
-            continue;
-        }
+	cv::invertAffineTransform( RigidTrans, iRigidTrans );
 
+	DrawDepthView ReadAndDrawDepth(CurrentWorkingFolder);
+	DrawCameraView ReadAndDrawCam(CurrentWorkingFolder);
 
-        // ok, got to depth frame, get it as uint16 data (millimeter value)
-        uint16_t *LocalData = &((uint16_t *) ReadAndDrawDepth.FrameBuffer)[DepthHeight * DepthWidth - 1];
+	Mat ImageView( cvSize(CamWidth,CamHeight), CV_8UC3 );
 
-        // Create a point cloud for this frame
-        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+	// Look at all data from timestamp
+	while( ReadAndDrawDepth.GetNextTimestamp() )
+	{
+		// Get current data from Kinect
+		if ( ReadAndDrawDepth.LoadFrame(ReadAndDrawDepth.CurrentTimestamp) == false ||
+			 ReadAndDrawCam.LoadFrame(ReadAndDrawDepth.CurrentTimestamp) == false )
 
-        // PArse all depth point and project back to XYZ values
-        for (int y = DepthHeight - 1; y >= 0; y--) {
-            //fprintf(stderr, "+");
-            for (int x = DepthWidth - 1; x >= 0; x--) {
-                float rx, rz, ry, ax, ay, az;
+		{
+			// Should never appear
+			fprintf( stderr, "argh\n\n" );
+			continue;
+		}
 
-                if (*LocalData >= 500) // && *LocalData <= 4500 )
-                {
-                    int CurPixel = DepthWidth * y + x;
+		ReadAndDrawCam.Draw(ImageView,ReadAndDrawCam.FrameBuffer,1);
 
-                    az = (*LocalData) / 1000.0f;    //The depth value from the Kinect back meters
+		// ok, got to depth frame, get it as uint16 data (millimeter value)
+		uint16_t * LocalData = &((uint16_t*)ReadAndDrawDepth.FrameBuffer)[DepthHeight*DepthWidth-1];
 
-                    // a. is in kinect frame, r. is rotated
-                    rx = az;
-                    ax = ry = rx * DepthToCamera[CurPixel].X;
-                    ay = rz = rx * DepthToCamera[CurPixel].Y;
+		// Create a point cloud for this frame
+		pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
-                    // construct a point
-                    pcl::PointXYZ Point;
-                    Point.x = rz;
-                    Point.y = ry;
-                    Point.z = rx;
+		// PArse all depth point and project back to XYZ values
+		for( int y = DepthHeight-1; y >= 0 ; y-- )
+		{
+			fprintf(stderr, "+");
+			for( int x = DepthWidth-1; x >= 0 ; x-- )
+			{
+				float rx, rz, ry, ax, ay, az;
 
-                    // push it in the pont cloud
-                    cloud->push_back(Point);
-                }
+				if ( *LocalData >= 500 ) // && *LocalData <= 4500 )
+				{
+					int CurPixel = DepthWidth*y+x;
+					
+					az = (*LocalData)/1000.0f;	//The depth value from the Kinect back meters
 
-                LocalData--;
-            }
-        }
+					// a. is in kinect frame, r. is rotated
+					rx = az;
+					ax = ry = rx * DepthToCamera[CurPixel].X;
+					ay = rz = rx * DepthToCamera[CurPixel].Y;
 
-        removePlane(cloud);
+					std::vector<cv::Point2f> DepthPoint;
+					DepthPoint.push_back(cv::Point2f(x,y));
+					std::vector<cv::Point2f> RGBPoint;
 
-        // Here we have a new cloud, view it
-        pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
-        viewer.showCloud(cloud);
-        while (!viewer.wasStopped()) {}
+					cv::transform( DepthPoint, RGBPoint, iRigidTrans );
 
-    }
+					Point3_<uchar>* p = ImageView.ptr<Point3_<uchar> >(RGBPoint[0].y,RGBPoint[0].x);
 
-    return 0;
+					// construct a point
+					pcl::PointXYZRGB Point;
+					Point.x = rz;
+					Point.y = ry;
+					Point.z = rx;
+					Point.r = p->z;
+					Point.g = p->y;
+					Point.b = p->x;
 
-}
+					// push it in the pont cloud
+					cloud->push_back(Point);
+				}
 
-void removePlane(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, float distanceThreshold, int pointThreshold){
-	/*
-	 * remove plane from the point cloud.
-	 */
-    while (true) {
-        pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
-        pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
-        // Create the segmentation object
-        pcl::SACSegmentation<pcl::PointXYZ> seg;
-        // Optional
-        seg.setOptimizeCoefficients(true);
-        // Mandatory
-        seg.setModelType(pcl::SACMODEL_PLANE);
-        seg.setMethodType(pcl::SAC_RANSAC);
-        seg.setDistanceThreshold(distanceThreshold);
+				LocalData--;
+			}
+		}
 
-        seg.setInputCloud(cloud);
-        seg.segment(*inliers, *coefficients);
-        fprintf(stderr, "nb pt : %lu", inliers->indices.size());
-        if (inliers->indices.size() < pointThreshold){ break;} //bread if the plane do not contain enough points
+    // Here we have a new cloud, view it
+    pcl::visualization::CloudViewer viewer ("Simple Cloud Viewer");
+    viewer.showCloud (cloud);
+    while (!viewer.wasStopped ()) {}
 
-        pcl::ExtractIndices<pcl::PointXYZ> extract;
-        extract.setInputCloud(cloud);
-        extract.setIndices(inliers);
-        extract.setNegative(true);
-        extract.filter(*cloud);
-        }
+    // Go within the loop to process next frame
+
+	}
+
+	return 0;
 
 }
