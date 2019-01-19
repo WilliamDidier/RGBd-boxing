@@ -81,10 +81,10 @@ struct robotPosition{
     float o;
 };
 
-void removePlane(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, struct plane &bestPlane, float distanceThreshold = 0.03, int pointThreshold = 20000);
+void removePlane(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, struct plane &bestPlane, float distanceThreshold = 0.03, int pointThreshold = 20000);
+void rotateCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, struct plane &bestPlane, struct robotPosition &robPos);
+void initRot(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
 
-void rotateCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, struct plane &bestPlane, struct robotPosition &robPos);
-void initRot(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud);
 using namespace cv;
 
 
@@ -108,8 +108,7 @@ int main( int argc, char *argv[] )
 	}
 	fclose( fdtc );
 
-	Mat RigidTrans = (Mat_<float>(2,3) << 0.340578906312217, 0.001079990228324099, -81.51090136055846, 0.0002631972723408978,
-		0.3441404069350427, 18.88198371718263);
+	Mat RigidTrans = (Mat_<float>(2,3) << 0.340578906312217, 0.001079990228324099, -81.51090136055846, 0.0002631972723408978, 0.3441404069350427, 18.88198371718263);
 
 	Mat iRigidTrans;
 
@@ -117,7 +116,6 @@ int main( int argc, char *argv[] )
 
     DrawDepthView ReadAndDrawDepth(CurrentWorkingFolder);
     ReadTimestampFile LocalisationData(CurrentWorkingFolder+"/robulab/Localization.timestamp");
-	DrawDepthView ReadAndDrawDepth(CurrentWorkingFolder);
 	DrawCameraView ReadAndDrawCam(CurrentWorkingFolder);
 
 	Mat ImageView( cvSize(CamWidth,CamHeight), CV_8UC3 );
@@ -126,31 +124,21 @@ int main( int argc, char *argv[] )
     while (ReadAndDrawDepth.GetNextTimestamp()) {
         // Get current data from Kinect
         if (!ReadAndDrawDepth.LoadFrame(ReadAndDrawDepth.CurrentTimestamp) ||
-            !LocalisationData.GetDataForTimestamp(ReadAndDrawDepth.CurrentTimestamp )) {
+            !LocalisationData.GetDataForTimestamp(ReadAndDrawDepth.CurrentTimestamp) ||
+            !ReadAndDrawCam.LoadFrame(ReadAndDrawDepth.CurrentTimestamp)) {
             // Should never appear
             fprintf(stderr, "argh\n\n");
             continue;
         }
-	// Look at all data from timestamp
-	while( ReadAndDrawDepth.GetNextTimestamp() )
-	{
-		// Get current data from Kinect
-		if ( ReadAndDrawDepth.LoadFrame(ReadAndDrawDepth.CurrentTimestamp) == false ||
-			 ReadAndDrawCam.LoadFrame(ReadAndDrawDepth.CurrentTimestamp) == false )
-
-		{
-			// Should never appear
-			fprintf( stderr, "argh\n\n" );
-			continue;
-		}
 
 		ReadAndDrawCam.Draw(ImageView,ReadAndDrawCam.FrameBuffer,1);
 
         // Load robot position
         uint16_t *LocalData = &((uint16_t *) ReadAndDrawDepth.FrameBuffer)[DepthHeight * DepthWidth - 1];
-        struct robotPosition curentRobotPosition;
+        struct robotPosition curentRobotPosition{};
         sscanf(LocalisationData.DataBuffer, "{\"x\":%f,\"y\":%f,\"o\":%f}",
                &curentRobotPosition.x, &curentRobotPosition.y, &curentRobotPosition.o);
+
 
 		// Create a point cloud for this frame
 		pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
@@ -158,7 +146,6 @@ int main( int argc, char *argv[] )
 		// PArse all depth point and project back to XYZ values
 		for( int y = DepthHeight-1; y >= 0 ; y-- )
 		{
-			fprintf(stderr, "+");
 			for( int x = DepthWidth-1; x >= 0 ; x-- )
 			{
 				float rx, rz, ry, ax, ay, az;
@@ -184,9 +171,9 @@ int main( int argc, char *argv[] )
 
 					// construct a point
 					pcl::PointXYZRGB Point;
-					Point.x = rz;
-					Point.y = ry;
-					Point.z = rx;
+					Point.x = -ry;
+					Point.y = rx;
+					Point.z = rz;
 					Point.r = p->z;
 					Point.g = p->y;
 					Point.b = p->x;
@@ -201,10 +188,10 @@ int main( int argc, char *argv[] )
 
         pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
         plane floorPlane;
-        initRot(cloud);
+//        initRot(cloud);
         removePlane(cloud, floorPlane);
         printf("Floor plane : a : %f, b: %f, c %f, d : %f \n", floorPlane.a, floorPlane.b, floorPlane.c, floorPlane.d);
-        rotateCloud(cloud, floorPlane, curentRobotPosition);
+//        rotateCloud(cloud, floorPlane, curentRobotPosition);
         viewer.showCloud(cloud);
         while (!viewer.wasStopped()) {}
 
@@ -214,21 +201,21 @@ int main( int argc, char *argv[] )
 
 }
 
-void initRot(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud) {
+void initRot(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud) {
     Eigen::Affine3f transform_2 = Eigen::Affine3f::Identity();
-    float theta = static_cast<float>(-3.14/8) ;
+    auto theta = static_cast<float>(-3.14/8) ;
     transform_2.rotate(Eigen::AngleAxisf(-0.643455, Eigen::Vector3f::UnitX()));
 
     pcl::transformPointCloud(*cloud, *cloud, transform_2);
 }
 
-void rotateCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &floorPlane, struct robotPosition &robPos){
+void rotateCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, plane &floorPlane, struct robotPosition &robPos){
     /*  METHOD #2: Using a Affine3f
     This method is easier and less error prone
   */
     Eigen::Affine3f transform = Eigen::Affine3f::Identity();
 
-    float costheta = static_cast<float>(floorPlane.b/(sqrt(pow(floorPlane.b,2)+pow(floorPlane.c,2))));
+    auto costheta = static_cast<float>(floorPlane.b/(sqrt(pow(floorPlane.b,2)+pow(floorPlane.c,2))));
     if (floorPlane.b < 0){
         costheta = -costheta;
     }
@@ -253,7 +240,7 @@ void rotateCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &floorPlane, 
     pcl::transformPointCloud (*cloud, *cloud, transform);
 }
 
-void removePlane(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &bestPlane, float distanceThreshold, int pointThreshold){
+void removePlane(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, plane &bestPlane, float distanceThreshold, int pointThreshold){
 	/*
 	 * remove plane from the point cloud.
 	 */
@@ -262,7 +249,7 @@ void removePlane(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &bestPlane, f
         pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
         pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
         // Create the segmentation object
-        pcl::SACSegmentation<pcl::PointXYZ> seg;
+        pcl::SACSegmentation<pcl::PointXYZRGB> seg;
         // Optional
         seg.setOptimizeCoefficients(true);
         // Mandatory
@@ -284,7 +271,7 @@ void removePlane(pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, plane &bestPlane, f
             bestPlane.c = coefficients->values[2];
             bestPlane.d = coefficients->values[3];
         }
-        pcl::ExtractIndices<pcl::PointXYZ> extract;
+        pcl::ExtractIndices<pcl::PointXYZRGB> extract;
         extract.setInputCloud(cloud);
         extract.setIndices(inliers);
         extract.setNegative(true);
