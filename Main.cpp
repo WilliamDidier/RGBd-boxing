@@ -188,7 +188,7 @@ int main( int argc, char *argv[] )
 
         pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
         plane floorPlane;
-//        initRot(cloud);
+        initRot(cloud);
         removePlane(cloud, floorPlane);
         printf("Floor plane : a : %f, b: %f, c %f, d : %f \n", floorPlane.a, floorPlane.b, floorPlane.c, floorPlane.d);
 //        rotateCloud(cloud, floorPlane, curentRobotPosition);
