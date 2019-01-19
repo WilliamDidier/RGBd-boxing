@@ -50,40 +50,13 @@ using namespace MobileRGBD::Kinect2;
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/common/common.h>
-#include <vtkRenderWindow.h>
-#include <vtkPNGWriter.h>
-#include <vtkWindowToImageFilter.h>
-#include <vtkRenderWindowInteractor.h>
 #include <pcl/common/transforms.h>
 #include <pcl/visualization/cloud_viewer.h>
 
-#include <algorithm>
-
 #include <System/Thread.h>
 
-struct plane{
-    /*
-     * Representation of a plane
-     * ax+by+cz+d = 0
-     */
-    float a;
-    float b;
-    float c;
-    float d;
-};
+#include "planeManagement.h"
 
-struct robotPosition{
-    /*
-     * Store the robot position
-     */
-    float x;
-    float y;
-    float o;
-};
-
-void removePlane(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, struct plane &bestPlane, float distanceThreshold = 0.03, int pointThreshold = 20000);
-void rotateCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, struct plane &bestPlane, struct robotPosition &robPos);
-void initRot(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
 void scene_clustering(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_filtered, std::stringstream& timestamp, float tolerance=0.02, float minsize=400, float maxsize = 50000);
 using namespace cv;
 
@@ -191,94 +164,18 @@ int main( int argc, char *argv[] )
         removePlane(cloud, floorPlane);
         printf("Floor plane : a : %f, b: %f, c %f, d : %f \n", floorPlane.a, floorPlane.b, floorPlane.c, floorPlane.d);
         rotateCloud(cloud, floorPlane, curentRobotPosition);
-//        pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
-//        viewer.showCloud(cloud);
-//        while (!viewer.wasStopped()) {}
-
+        pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
+        viewer.showCloud(cloud);
+        while (!viewer.wasStopped()) {}
         std::stringstream timestamp;
-        timestamp << ReadAndDrawDepth.CurrentTimestamp.time+"_"+ReadAndDrawDepth.CurrentTimestamp.millitm;
-        scene_clustering(cloud, timestamp);
+        timestamp << ReadAndDrawDepth.CurrentTimestamp.time << "_" << ReadAndDrawDepth.CurrentTimestamp.millitm;
+//        scene_clustering(cloud, timestamp);
     }
 
     return 0;
 
 }
 
-void initRot(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud) {
-    Eigen::Affine3f transform_2 = Eigen::Affine3f::Identity();
-    auto theta = static_cast<float>(-3.14/8) ;
-    transform_2.rotate(Eigen::AngleAxisf(-0.643455, Eigen::Vector3f::UnitX()));
-
-    pcl::transformPointCloud(*cloud, *cloud, transform_2);
-}
-
-void rotateCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, plane &floorPlane, struct robotPosition &robPos){
-    Eigen::Affine3f transform = Eigen::Affine3f::Identity();
-
-    auto costheta = static_cast<float>(floorPlane.c/(sqrt(pow(floorPlane.b,2)+pow(floorPlane.c,2))));
-    if (floorPlane.c < 0){
-        costheta = -costheta;
-    }
-
-    printf(" theta : %f \n", costheta);
-    float theta = static_cast<float>(-acos(costheta));
-    printf(" theta : %f \n", theta);
-    transform.rotate (Eigen::AngleAxisf (theta, Eigen::Vector3f::UnitX()));
-    pcl::transformPointCloud (*cloud, *cloud, transform);
-    transform = Eigen::Affine3f::Identity();
-
-    transform.translation() << 0.02, 0, (floorPlane.d/(sqrt(pow(floorPlane.b,2)+pow(floorPlane.c,2)+pow(floorPlane.a,2))));
-    pcl::transformPointCloud (*cloud, *cloud, transform);
-    transform = Eigen::Affine3f::Identity();
-
-
-    transform.rotate (Eigen::AngleAxisf (-robPos.o, Eigen::Vector3f::UnitZ()));
-    pcl::transformPointCloud (*cloud, *cloud, transform);
-    transform = Eigen::Affine3f::Identity();
-
-    transform.translation() << -robPos.x, -robPos.y, 0;
-    pcl::transformPointCloud (*cloud, *cloud, transform);
-}
-
-void removePlane(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, plane &bestPlane, float distanceThreshold, int pointThreshold){
-	/*
-	 * remove plane from the point cloud.
-	 */
-    bestPlane.c = 0;
-    while (true) {
-        pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
-        pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
-        // Create the segmentation object
-        pcl::SACSegmentation<pcl::PointXYZRGB> seg;
-        // Optional
-        seg.setOptimizeCoefficients(true);
-        // Mandatory
-        seg.setModelType(pcl::SACMODEL_PLANE);
-        seg.setMethodType(pcl::SAC_RANSAC);
-        seg.setDistanceThreshold(distanceThreshold);
-
-        seg.setInputCloud(cloud);
-        seg.segment(*inliers, *coefficients);
-        fprintf(stderr, "nb pt : %lu \n", inliers->indices.size());
-        if (inliers->indices.size() < pointThreshold){ break;} //break if the plane do not contain enough points
-        std::cerr << "Model coefficients: " << coefficients->values[0] << " "
-                  << coefficients->values[1] << " "
-                  << coefficients->values[2] << " "
-                  << coefficients->values[3] << std::endl;
-        if (abs(coefficients->values[2]) > abs(bestPlane.c)){
-            bestPlane.a = coefficients->values[0];
-            bestPlane.b = coefficients->values[1];
-            bestPlane.c = coefficients->values[2];
-            bestPlane.d = coefficients->values[3];
-        }
-        pcl::ExtractIndices<pcl::PointXYZRGB> extract;
-        extract.setInputCloud(cloud);
-        extract.setIndices(inliers);
-        extract.setNegative(true);
-        extract.filter(*cloud);
-        }
-
-}
 
 void scene_clustering(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_filtered, std::stringstream& timestamp, float tolerance, float minsize, float maxsize){
 // Creating the KdTree object for the search method of the extraction
@@ -311,6 +208,7 @@ void scene_clustering(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_filter
         cloud_cluster->height = 1;
         cloud_cluster->is_dense = true;
         std::cout << "PointCloud representing the Cluster: " << cloud_cluster->points.size () << " data points.\n" << std::endl;
+        Eigen::Vector4f centroid;
 
         //Creating new folder to save the clusters
         mkdir("ProcessedClusters", 0000700);
