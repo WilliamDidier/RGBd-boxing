@@ -84,7 +84,7 @@ struct robotPosition{
 void removePlane(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, struct plane &bestPlane, float distanceThreshold = 0.03, int pointThreshold = 20000);
 void rotateCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, struct plane &bestPlane, struct robotPosition &robPos);
 void initRot(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud);
-
+void scene_clustering(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_filtered, std::stringstream& timestamp, float tolerance=0.02, float minsize=400, float maxsize = 50000);
 using namespace cv;
 
 
@@ -186,15 +186,18 @@ int main( int argc, char *argv[] )
             }
         }
 
-        pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
         plane floorPlane;
 //        initRot(cloud);
         removePlane(cloud, floorPlane);
         printf("Floor plane : a : %f, b: %f, c %f, d : %f \n", floorPlane.a, floorPlane.b, floorPlane.c, floorPlane.d);
         rotateCloud(cloud, floorPlane, curentRobotPosition);
-        viewer.showCloud(cloud);
-        while (!viewer.wasStopped()) {}
+//        pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
+//        viewer.showCloud(cloud);
+//        while (!viewer.wasStopped()) {}
 
+        std::stringstream timestamp;
+        timestamp << ReadAndDrawDepth.CurrentTimestamp.time+"_"+ReadAndDrawDepth.CurrentTimestamp.millitm;
+        scene_clustering(cloud, timestamp);
     }
 
     return 0;
@@ -210,9 +213,6 @@ void initRot(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud) {
 }
 
 void rotateCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, plane &floorPlane, struct robotPosition &robPos){
-    /*  METHOD #2: Using a Affine3f
-    This method is easier and less error prone
-  */
     Eigen::Affine3f transform = Eigen::Affine3f::Identity();
 
     auto costheta = static_cast<float>(floorPlane.c/(sqrt(pow(floorPlane.b,2)+pow(floorPlane.c,2))));
@@ -278,4 +278,50 @@ void removePlane(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, plane &bestPlane
         extract.filter(*cloud);
         }
 
+}
+
+void scene_clustering(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_filtered, std::stringstream& timestamp, float tolerance, float minsize, float maxsize){
+// Creating the KdTree object for the search method of the extraction
+    pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZRGB>);
+    tree->setInputCloud (cloud_filtered);
+    pcl::PCDWriter writer;
+
+    std::vector<pcl::PointIndices> cluster_indices;
+    pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ec;
+
+    //Setting parameters
+    ec.setClusterTolerance (tolerance);
+    ec.setMinClusterSize (minsize);
+    ec.setMaxClusterSize (maxsize);
+    ec.setSearchMethod (tree);
+
+    //Extracting clusters from the given cloud
+    ec.setInputCloud (cloud_filtered);
+    ec.extract (cluster_indices);
+
+    // Clusters are extracted, we iterate over them to save them
+    int j = 0;
+    for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin (); it != cluster_indices.end (); ++it)
+    {
+        //Creating new cloud with individual cluster
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_cluster (new pcl::PointCloud<pcl::PointXYZRGB>);
+        for (std::vector<int>::const_iterator pit = it->indices.begin (); pit != it->indices.end (); ++pit)
+            cloud_cluster->points.push_back (cloud_filtered->points[*pit]); //*
+        cloud_cluster->width = cloud_cluster->points.size ();
+        cloud_cluster->height = 1;
+        cloud_cluster->is_dense = true;
+        std::cout << "PointCloud representing the Cluster: " << cloud_cluster->points.size () << " data points.\n" << std::endl;
+
+        //Creating new folder to save the clusters
+        mkdir("ProcessedClusters", 0000700);
+        std::stringstream filename;
+        filename << "ProcessedClusters/" << timestamp.str();
+        //Creating new folder for current timestamp
+        mkdir(filename.str().c_str(), 0000700);
+        //Changing filnename for each cluster at given timestamp
+        filename << "/cloud_cluster_" << j << ".pcd";
+        //Saving the cluster
+        writer.write<pcl::PointXYZRGB> (filename.str (), *cloud_cluster, false); //*
+        j++;
+    }
 }
