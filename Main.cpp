@@ -188,10 +188,10 @@ int main( int argc, char *argv[] )
 
         pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
         plane floorPlane;
-        initRot(cloud);
+//        initRot(cloud);
         removePlane(cloud, floorPlane);
         printf("Floor plane : a : %f, b: %f, c %f, d : %f \n", floorPlane.a, floorPlane.b, floorPlane.c, floorPlane.d);
-//        rotateCloud(cloud, floorPlane, curentRobotPosition);
+        rotateCloud(cloud, floorPlane, curentRobotPosition);
         viewer.showCloud(cloud);
         while (!viewer.wasStopped()) {}
 
@@ -215,8 +215,8 @@ void rotateCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, plane &floorPlan
   */
     Eigen::Affine3f transform = Eigen::Affine3f::Identity();
 
-    auto costheta = static_cast<float>(floorPlane.b/(sqrt(pow(floorPlane.b,2)+pow(floorPlane.c,2))));
-    if (floorPlane.b < 0){
+    auto costheta = static_cast<float>(floorPlane.c/(sqrt(pow(floorPlane.b,2)+pow(floorPlane.c,2))));
+    if (floorPlane.c < 0){
         costheta = -costheta;
     }
 
@@ -227,16 +227,16 @@ void rotateCloud(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, plane &floorPlan
     pcl::transformPointCloud (*cloud, *cloud, transform);
     transform = Eigen::Affine3f::Identity();
 
-    transform.translation() << 0, -(floorPlane.d/(sqrt(pow(floorPlane.b,2)+pow(floorPlane.c,2)+pow(floorPlane.a,2)))), 0;
+    transform.translation() << 0.02, 0, (floorPlane.d/(sqrt(pow(floorPlane.b,2)+pow(floorPlane.c,2)+pow(floorPlane.a,2))));
     pcl::transformPointCloud (*cloud, *cloud, transform);
     transform = Eigen::Affine3f::Identity();
 
 
-    transform.rotate (Eigen::AngleAxisf (-robPos.o, Eigen::Vector3f::UnitY()));
+    transform.rotate (Eigen::AngleAxisf (-robPos.o, Eigen::Vector3f::UnitZ()));
     pcl::transformPointCloud (*cloud, *cloud, transform);
     transform = Eigen::Affine3f::Identity();
 
-    transform.translation() << -robPos.x, 0, -robPos.y;
+    transform.translation() << -robPos.x, -robPos.y, 0;
     pcl::transformPointCloud (*cloud, *cloud, transform);
 }
 
@@ -244,7 +244,7 @@ void removePlane(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, plane &bestPlane
 	/*
 	 * remove plane from the point cloud.
 	 */
-    bestPlane.b = 0;
+    bestPlane.c = 0;
     while (true) {
         pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
         pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
@@ -265,7 +265,7 @@ void removePlane(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, plane &bestPlane
                   << coefficients->values[1] << " "
                   << coefficients->values[2] << " "
                   << coefficients->values[3] << std::endl;
-        if (abs(coefficients->values[1]) > abs(bestPlane.b)){
+        if (abs(coefficients->values[2]) > abs(bestPlane.c)){
             bestPlane.a = coefficients->values[0];
             bestPlane.b = coefficients->values[1];
             bestPlane.c = coefficients->values[2];
