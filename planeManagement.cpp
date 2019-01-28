@@ -3,6 +3,8 @@
 //
 
 #include "planeManagement.h"
+#include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/visualization/cloud_viewer.h>
 void initRot(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud) {
     Eigen::Affine3f transform_2 = Eigen::Affine3f::Identity();
     auto theta = static_cast<float>(-3.14/8) ;
@@ -75,6 +77,9 @@ void removePlane(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud, plane &bestPlane
         extract.setIndices(inliers);
         extract.setNegative(true);
         extract.filter(*cloud);
+//        pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
+ //       viewer.showCloud(cloud);
+  //      while (!viewer.wasStopped()) {}
         }
 
 }

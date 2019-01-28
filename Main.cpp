@@ -20,7 +20,7 @@
 
 #include <sys/stat.h>
 #if defined WIN32 || defined WIN64
-	#include <direct.h>
+#include <direct.h>
 #endif
 
 #include "Drawing/DrawDepthView.h"
@@ -159,17 +159,19 @@ int main( int argc, char *argv[] )
             }
         }
 
+	printf("Cloud size : %i", cloud->size());
         plane floorPlane;
 //        initRot(cloud);
         removePlane(cloud, floorPlane);
+
         printf("Floor plane : a : %f, b: %f, c %f, d : %f \n", floorPlane.a, floorPlane.b, floorPlane.c, floorPlane.d);
         rotateCloud(cloud, floorPlane, curentRobotPosition);
+        std::stringstream timestamp;
+        timestamp << ReadAndDrawDepth.CurrentTimestamp.time << "_" << ReadAndDrawDepth.CurrentTimestamp.millitm;
         pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
         viewer.showCloud(cloud);
         while (!viewer.wasStopped()) {}
-        std::stringstream timestamp;
-        timestamp << ReadAndDrawDepth.CurrentTimestamp.time << "_" << ReadAndDrawDepth.CurrentTimestamp.millitm;
-//        scene_clustering(cloud, timestamp);
+        scene_clustering(cloud, timestamp);
     }
 
     return 0;
@@ -210,6 +212,10 @@ void scene_clustering(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_filter
         std::cout << "PointCloud representing the Cluster: " << cloud_cluster->points.size () << " data points.\n" << std::endl;
         Eigen::Vector4f centroid;
 
+        pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
+        viewer.showCloud(cloud_cluster);
+        while (!viewer.wasStopped()) {}
+        scene_clustering(cloud_cluster, timestamp);
         //Creating new folder to save the clusters
         mkdir("ProcessedClusters", 0000700);
         std::stringstream filename;
