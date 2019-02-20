@@ -20,10 +20,11 @@
 
 #include <sys/stat.h>
 #if defined WIN32 || defined WIN64
-	#include <direct.h>
+#include <direct.h>
 #endif
 
 #include "Drawing/DrawDepthView.h"
+#include "Drawing/DrawCameraView.h"
 
 #include <System/SimpleList.h>
 #include <System/SimpleString.h>
@@ -49,19 +50,16 @@ using namespace MobileRGBD::Kinect2;
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/common/common.h>
-#include <vtkRenderWindow.h>
-#include <vtkPNGWriter.h>
-#include <vtkWindowToImageFilter.h>
-#include <vtkRenderWindowInteractor.h>
-
+#include <pcl/common/transforms.h>
 #include <pcl/visualization/cloud_viewer.h>
-
-#include <algorithm>
 
 #include <System/Thread.h>
 
-void removePlane(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, float distanceThreshold = 0.03, int pointThreshold = 20000);
-void scene_clustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_filtered, std::stringstream& timestamp, float tolerance = 0.02, float minsize = 400, float maxsize = 50000);
+#include "planeManagement.h"
+#include "sceneClustering.h"
+using namespace cv;
+
+
 /** @brief You must call with a folder name
  * @return 0 if successful, negative value for failure.
  * @example
@@ -82,149 +80,101 @@ int main( int argc, char *argv[] )
 	}
 	fclose( fdtc );
 
+	Mat RigidTrans = (Mat_<float>(2,3) << 0.340578906312217, 0.001079990228324099, -81.51090136055846, 0.0002631972723408978, 0.3441404069350427, 18.88198371718263);
 
-	DrawDepthView ReadAndDrawDepth(CurrentWorkingFolder);
+	Mat iRigidTrans;
 
-	// Look at all data from timestamp
-	while( ReadAndDrawDepth.GetNextTimestamp() )
-	{
-		// Get current data from Kinect
-		if ( ReadAndDrawDepth.LoadFrame(ReadAndDrawDepth.CurrentTimestamp) == false )
-		{
-			// Should never appear
-			fprintf( stderr, "argh\n\n" );
-			continue;
-		}
+	cv::invertAffineTransform( RigidTrans, iRigidTrans );
 
+    DrawDepthView ReadAndDrawDepth(CurrentWorkingFolder);
+    ReadTimestampFile LocalisationData(CurrentWorkingFolder+"/robulab/Localization.timestamp");
+	DrawCameraView ReadAndDrawCam(CurrentWorkingFolder);
 
-		// ok, got to depth frame, get it as uint16 data (millimeter value)
-		uint16_t * LocalData = &((uint16_t*)ReadAndDrawDepth.FrameBuffer)[DepthHeight*DepthWidth-1];
+	Mat ImageView( cvSize(CamWidth,CamHeight), CV_8UC3 );
+
+    // Look at all data from timestamp
+    while (ReadAndDrawDepth.GetNextTimestamp()) {
+        // Get current data from Kinect
+        if (!ReadAndDrawDepth.LoadFrame(ReadAndDrawDepth.CurrentTimestamp) ||
+            !LocalisationData.GetDataForTimestamp(ReadAndDrawDepth.CurrentTimestamp) ||
+            !ReadAndDrawCam.LoadFrame(ReadAndDrawDepth.CurrentTimestamp)) {
+            // Should never appear
+            fprintf(stderr, "argh\n\n");
+            continue;
+        }
+
+		ReadAndDrawCam.Draw(ImageView,ReadAndDrawCam.FrameBuffer,1);
+
+        // Load robot position
+        uint16_t *LocalData = &((uint16_t *) ReadAndDrawDepth.FrameBuffer)[DepthHeight * DepthWidth - 1];
+        struct robotPosition curentRobotPosition{};
+        sscanf(LocalisationData.DataBuffer, "{\"x\":%f,\"y\":%f,\"o\":%f}",
+               &curentRobotPosition.x, &curentRobotPosition.y, &curentRobotPosition.o);
+
 
 		// Create a point cloud for this frame
-		pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+		pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
 		// PArse all depth point and project back to XYZ values
 		for( int y = DepthHeight-1; y >= 0 ; y-- )
 		{
-			fprintf(stderr, "+");
 			for( int x = DepthWidth-1; x >= 0 ; x-- )
 			{
 				float rx, rz, ry, ax, ay, az;
 
-				if ( *LocalData >= 500 ) // && *LocalData <= 4500 )
-				{
-					int CurPixel = DepthWidth*y+x;
+                if (*LocalData >= 500) // && *LocalData <= 4500 )
+                {
+                    int CurPixel = DepthWidth * y + x;
 
-					az = (*LocalData)/1000.0f;	//The depth value from the Kinect back meters
+                    az = (*LocalData) / 1000.0f;    //The depth value from the Kinect back meters
 
 					// a. is in kinect frame, r. is rotated
 					rx = az;
 					ax = ry = rx * DepthToCamera[CurPixel].X;
 					ay = rz = rx * DepthToCamera[CurPixel].Y;
 
+					std::vector<cv::Point2f> DepthPoint;
+					DepthPoint.push_back(cv::Point2f(x,y));
+					std::vector<cv::Point2f> RGBPoint;
+
+					cv::transform( DepthPoint, RGBPoint, iRigidTrans );
+
+					Point3_<uchar>* p = ImageView.ptr<Point3_<uchar> >(RGBPoint[0].y,RGBPoint[0].x);
+
 					// construct a point
-					pcl::PointXYZ Point;
-					Point.x = rz;
-					Point.y = ry;
-					Point.z = rx;
+					pcl::PointXYZRGB Point;
+					Point.x = -ry;
+					Point.y = rx;
+					Point.z = rz;
+					Point.r = p->z;
+					Point.g = p->y;
+					Point.b = p->x;
 
-					// push it in the pont cloud
-					cloud->push_back(Point);
-				}
+                    // push it in the pont cloud
+                    cloud->push_back(Point);
+                }
 
-				LocalData--;
-			}
-		}
- 		removePlane(cloud);
-
-		std::stringstream timestamp;
-		timestamp << ReadAndDrawDepth.CurrentTimestamp.time << "_" << ReadAndDrawDepth.CurrentTimestamp.millitm;
-		scene_clustering(cloud, timestamp);
-
-    // Here we have a new cloud, uncomment to view it
-    /*pcl::visualization::CloudViewer viewer ("Simple Cloud Viewer");
-    viewer.showCloud (cloud);
-    while (!viewer.wasStopped ()) {}
-		*/
-    // Go within the loop to process next frame
-
-	}
-
-	return 0;
-
-}
-
-void removePlane(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud, float distanceThreshold, int pointThreshold){
-	/*
-	 * remove plane from the point cloud.
-	 */
-    while (true) {
-        pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
-        pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
-        // Create the segmentation object
-        pcl::SACSegmentation<pcl::PointXYZ> seg;
-        // Optional
-        seg.setOptimizeCoefficients(true);
-        // Mandatory
-        seg.setModelType(pcl::SACMODEL_PLANE);
-        seg.setMethodType(pcl::SAC_RANSAC);
-        seg.setDistanceThreshold(distanceThreshold);
-
-        seg.setInputCloud(cloud);
-        seg.segment(*inliers, *coefficients);
-        fprintf(stderr, "nb pt : %lu", inliers->indices.size(), "\n");
-        if (inliers->indices.size() < pointThreshold){ break;} //break if the plane do not contain enough points
-
-        pcl::ExtractIndices<pcl::PointXYZ> extract;
-        extract.setInputCloud(cloud);
-        extract.setIndices(inliers);
-        extract.setNegative(true);
-        extract.filter(*cloud);
+                LocalData--;
+            }
         }
-}
 
-void scene_clustering(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_filtered, std::stringstream& timestamp, float tolerance, float minsize, float maxsize){
-// Creating the KdTree object for the search method of the extraction
-  pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
-  tree->setInputCloud (cloud_filtered);
-	pcl::PCDWriter writer;
+	printf("Cloud size : %i", cloud->size());
+        plane floorPlane;
+//        initRot(cloud);
+        removePlane(cloud, floorPlane);
 
-  std::vector<pcl::PointIndices> cluster_indices;
-  pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
+        printf("Floor plane : a : %f, b: %f, c %f, d : %f \n", floorPlane.a, floorPlane.b, floorPlane.c, floorPlane.d);
+        rotateCloud(cloud, floorPlane, curentRobotPosition);
+        std::stringstream timestamp;
+        timestamp << ReadAndDrawDepth.CurrentTimestamp.time << "_" << ReadAndDrawDepth.CurrentTimestamp.millitm;
+				/*
+        pcl::visualization::CloudViewer viewer("Simple Cloud Viewer");
+        viewer.showCloud(cloud);
+        while (!viewer.wasStopped()) {}
+				*/
+        scene_clustering(cloud, timestamp);
+    }
 
-	//Setting parameters
-  ec.setClusterTolerance (tolerance);
-  ec.setMinClusterSize (minsize);
-  ec.setMaxClusterSize (maxsize);
-  ec.setSearchMethod (tree);
+		return 0;
 
-	//Extracting clusters from the given cloud
-  ec.setInputCloud (cloud_filtered);
-  ec.extract (cluster_indices);
-
-	// Clusters are extracted, we iterate over them to save them
-  int j = 0;
-  for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin (); it != cluster_indices.end (); ++it)
-  {
-		//Creating new cloud with individual cluster
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cluster (new pcl::PointCloud<pcl::PointXYZ>);
-    for (std::vector<int>::const_iterator pit = it->indices.begin (); pit != it->indices.end (); ++pit)
-      cloud_cluster->points.push_back (cloud_filtered->points[*pit]); //*
-    cloud_cluster->width = cloud_cluster->points.size ();
-    cloud_cluster->height = 1;
-    cloud_cluster->is_dense = true;
-    std::cout << "PointCloud representing the Cluster: " << cloud_cluster->points.size () << " data points.\n" << std::endl;
-
-		//Creating new folder to save the clusters
-		mkdir("ProcessedClusters", 0000700);
-		std::stringstream filename;
-		filename << "ProcessedClusters/" << timestamp.str();
-		//Creating new folder for current timestamp
-		mkdir(filename.str().c_str(), 0000700);
-		//Changing filnename for each cluster at given timestamp
-    filename << "/cloud_cluster_" << j << ".pcd";
-		//Saving the cluster
-    writer.write<pcl::PointXYZ> (filename.str (), *cloud_cluster, false); //*
-    j++;
-  }
 }

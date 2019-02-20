@@ -16,13 +16,11 @@ endfunction(AddSourceInGroup)
 
 if(CMAKE_COMPILER_IS_GNUCXX)
     add_definitions(-std=c++11)
-    set(THREADS_PREFER_PTHREAD_FLAG ON)
-    find_package(Threads REQUIRED)
 endif()
 
 add_definitions(-DKINECT_2 -DACTIVATE_KINECT_DRAWING -D_FILE_OFFSET_BITS=64)
 
-find_package(PCL 1.8 REQUIRED)
+find_package(PCL)
 include_directories(${PCL_INCLUDE_DIRS})
 link_directories(${PCL_LIBRARY_DIRS})
 add_definitions(${PCL_DEFINITIONS})
@@ -73,9 +71,11 @@ file(GLOB_RECURSE HDRS RELATIVE ${CWD}
         "${PARENTWD}/Map/*.hpp"
         )
 
-# list(REMOVE_ITEM PCL_LIBRARIES "vtkproj4")
+#list(REMOVE_ITEM PCL_LIBRARIES "vtkproj4")
 
-add_executable(main Main.cpp ${SRCS} ${HDRS} ${OMISCID_SYSTEM} ${OMISCID_JSON} ${OMISCID_MESSAGING} ${DRAWING}  ${DATAMANAGEMENT} ${KINECT} ${MAP})
+add_executable(main Main.cpp ${SRCS} ${HDRS} ${OMISCID_SYSTEM} ${OMISCID_JSON} ${OMISCID_MESSAGING} ${DRAWING}  ${DATAMANAGEMENT} ${KINECT} ${MAP} planeManagement.cpp planeManagement.h sceneClustering.h sceneClustering.cpp)
 target_link_libraries(main ${OpenCV_LIBS})
 #target_link_libraries(main ${PCL_COMMON_LIBRARIES} ${PCL_IO_LIBRARIES} ${PCL_LIBRARIES} ${PCL_VISUALISATION_LIBRARIES})
 target_link_libraries(main ${PCL_LIBRARIES})
+
+
