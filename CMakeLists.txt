@@ -73,9 +73,7 @@ file(GLOB_RECURSE HDRS RELATIVE ${CWD}
 
 #list(REMOVE_ITEM PCL_LIBRARIES "vtkproj4")
 
-add_executable(main Main.cpp ${SRCS} ${HDRS} ${OMISCID_SYSTEM} ${OMISCID_JSON} ${OMISCID_MESSAGING} ${DRAWING}  ${DATAMANAGEMENT} ${KINECT} ${MAP} planeManagement.cpp planeManagement.h sceneClustering.h sceneClustering.cpp)
+add_executable(main Main.cpp ${SRCS} ${HDRS} ${OMISCID_SYSTEM} ${OMISCID_JSON} ${OMISCID_MESSAGING} ${DRAWING}  ${DATAMANAGEMENT} ${KINECT} ${MAP} planeManagement.cpp planeManagement.h bodyProcessing.cpp bodyProcessing.h sceneClustering.h sceneClustering.cpp)
 target_link_libraries(main ${OpenCV_LIBS})
 #target_link_libraries(main ${PCL_COMMON_LIBRARIES} ${PCL_IO_LIBRARIES} ${PCL_LIBRARIES} ${PCL_VISUALISATION_LIBRARIES})
 target_link_libraries(main ${PCL_LIBRARIES})
-
-

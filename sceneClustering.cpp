@@ -56,6 +56,10 @@ void scene_clustering(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_filter
     pcl::PCDWriter writer;
 		mkdir("ProcessedClusters", 0000700);
 		std::stringstream filename;
-		filename << "ProcessedClusters/" << timestamp.str() <<"_body.pcd";
+		filename << "ProcessedClusters/" << timestamp.str();
+    mkdir(filename.str().c_str(), 0000700);
+    filename << "/" << timestamp.str() << "_body.pcd";
 		writer.write<pcl::PointXYZRGB> (filename.str (), *body_cluster, false); //*
+    compute_bounding_box(timestamp, filename);
+		body_part_clustering(timestamp, filename);
 }

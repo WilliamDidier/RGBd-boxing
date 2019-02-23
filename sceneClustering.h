@@ -11,6 +11,7 @@
 #include <pcl/common/distances.h>
 #include <pcl/common/centroid.h>
 #include <pcl/io/pcd_io.h>
+#include "bodyProcessing.h"
 
 void scene_clustering(const pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud_filtered, std::stringstream& timestamp, float tolerance=0.02, float minsize=400, float maxsize = 50000);
 
